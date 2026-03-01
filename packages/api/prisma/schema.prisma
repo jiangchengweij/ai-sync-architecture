@@ -1,0 +1,275 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String    @id @default(uuid()) @db.Uuid
+  email       String    @unique @db.VarChar(255)
+  name        String?   @db.VarChar(255)
+  passwordHash String?  @map("password_hash")
+  avatarUrl   String?   @map("avatar_url") @db.VarChar(500)
+  role        String    @default("developer") @db.VarChar(50)
+  settings    Json      @default("{}")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  lastLoginAt DateTime? @map("last_login_at") @db.Timestamptz
+
+  auditLogs AuditLog[]
+  reviews   Review[]
+
+  @@map("users")
+}
+
+model ProjectGroup {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @unique @db.VarChar(255)
+  description  String?
+  syncStrategy Json     @default("{\"mode\":\"semi-automatic\",\"confidenceThreshold\":0.85,\"autoMerge\":false}") @map("sync_strategy")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  projects     Project[]
+  codeMappings CodeMapping[]
+  syncTasks    SyncTask[]
+
+  @@map("project_groups")
+}
+
+enum ProjectType {
+  base
+  variant
+}
+
+model Project {
+  id              String      @id @default(uuid()) @db.Uuid
+  projectGroupId  String      @map("project_group_id") @db.Uuid
+  name            String      @db.VarChar(255)
+  gitUrl          String      @unique @map("git_url") @db.VarChar(500)
+  gitBranch       String      @default("main") @map("git_branch") @db.VarChar(255)
+  type            ProjectType
+  status          String      @default("active") @db.VarChar(50)
+  codeFingerprint String?     @map("code_fingerprint")
+  lastSyncedAt    DateTime?   @map("last_synced_at") @db.Timestamptz
+  metadata        Json        @default("{}")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  projectGroup       ProjectGroup  @relation(fields: [projectGroupId], references: [id], onDelete: Cascade)
+  diffRegions        DiffRegion[]
+  baseMappings       CodeMapping[] @relation("BaseMappings")
+  variantMappings    CodeMapping[] @relation("VariantMappings")
+  syncResults        SyncResult[]
+
+  @@index([projectGroupId])
+  @@index([type])
+  @@index([status])
+  @@map("projects")
+}
+
+enum DiffRegionType {
+  excluded
+  customized
+  auto_detected
+}
+
+model DiffRegion {
+  id          String         @id @default(uuid()) @db.Uuid
+  projectId   String         @map("project_id") @db.Uuid
+  pathPattern String         @map("path_pattern") @db.VarChar(500)
+  regionType  DiffRegionType @map("region_type")
+  description String?
+  metadata    Json           @default("{}")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([regionType])
+  @@map("diff_regions")
+}
+
+model CodeMapping {
+  id               String   @id @default(uuid()) @db.Uuid
+  projectGroupId   String   @map("project_group_id") @db.Uuid
+  baseProjectId    String   @map("base_project_id") @db.Uuid
+  variantProjectId String   @map("variant_project_id") @db.Uuid
+  baseFilePath     String   @map("base_file_path") @db.VarChar(500)
+  baseFunctionName String?  @map("base_function_name") @db.VarChar(255)
+  variantFilePath  String   @map("variant_file_path") @db.VarChar(500)
+  variantFunctionName String? @map("variant_function_name") @db.VarChar(255)
+  matchConfidence  Decimal  @map("match_confidence") @db.Decimal(5, 4)
+  structuralMatch  Boolean  @default(false) @map("structural_match")
+  metadata         Json     @default("{}")
+  lastVerifiedAt   DateTime? @map("last_verified_at") @db.Timestamptz
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  projectGroup   ProjectGroup @relation(fields: [projectGroupId], references: [id], onDelete: Cascade)
+  baseProject    Project      @relation("BaseMappings", fields: [baseProjectId], references: [id], onDelete: Cascade)
+  variantProject Project      @relation("VariantMappings", fields: [variantProjectId], references: [id], onDelete: Cascade)
+
+  @@unique([baseProjectId, variantProjectId, baseFilePath, variantFilePath])
+  @@index([projectGroupId])
+  @@index([baseProjectId])
+  @@index([variantProjectId])
+  @@index([matchConfidence])
+  @@map("code_mappings")
+}
+
+enum SyncStatus {
+  pending
+  analyzing
+  generating
+  reviewing
+  executing
+  completed
+  failed
+  cancelled
+}
+
+model SyncTask {
+  id                String     @id @default(uuid()) @db.Uuid
+  projectGroupId    String     @map("project_group_id") @db.Uuid
+  baseCommitHash    String     @map("base_commit_hash") @db.VarChar(40)
+  baseCommitMessage String?    @map("base_commit_message")
+  changeType        String     @map("change_type") @db.VarChar(50)
+  changeSummary     String?    @map("change_summary")
+  affectedFiles     Json       @default("[]") @map("affected_files")
+  status            SyncStatus @default(pending)
+  errorMessage      String?    @map("error_message")
+  metadata          Json       @default("{}")
+  createdBy         String?    @map("created_by") @db.Uuid
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  startedAt         DateTime?  @map("started_at") @db.Timestamptz
+  completedAt       DateTime?  @map("completed_at") @db.Timestamptz
+
+  projectGroup ProjectGroup @relation(fields: [projectGroupId], references: [id], onDelete: Cascade)
+  syncResults  SyncResult[]
+
+  @@index([projectGroupId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("sync_tasks")
+}
+
+enum SyncResultStatus {
+  pending
+  generated
+  reviewing
+  approved
+  rejected
+  applied
+  merged
+  failed
+}
+
+model SyncResult {
+  id           String           @id @default(uuid()) @db.Uuid
+  syncTaskId   String           @map("sync_task_id") @db.Uuid
+  variantId    String           @map("variant_id") @db.Uuid
+  status       SyncResultStatus @default(pending)
+  confidence   Decimal          @db.Decimal(5, 4)
+  riskLevel    String           @default("low") @map("risk_level") @db.VarChar(20)
+  patchContent String?          @map("patch_content")
+  adaptedFiles Json             @default("[]") @map("adapted_files")
+  explanation  String?
+  warnings     Json             @default("[]")
+  branchName   String?          @map("branch_name") @db.VarChar(255)
+  prUrl        String?          @map("pr_url") @db.VarChar(500)
+  commitHash   String?          @map("commit_hash") @db.VarChar(40)
+  errorMessage String?          @map("error_message")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  syncTask  SyncTask  @relation(fields: [syncTaskId], references: [id], onDelete: Cascade)
+  variant   Project   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  review    Review?
+  feedbacks FeedbackHistory[]
+
+  @@index([syncTaskId])
+  @@index([variantId])
+  @@index([status])
+  @@index([confidence])
+  @@map("sync_results")
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+  expired
+}
+
+enum ReviewDecision {
+  approve
+  reject
+  modify
+}
+
+model Review {
+  id            String          @id @default(uuid()) @db.Uuid
+  syncResultId  String          @unique @map("sync_result_id") @db.Uuid
+  reviewerId    String?         @map("reviewer_id") @db.Uuid
+  status        ReviewStatus    @default(pending)
+  decision      ReviewDecision?
+  feedback      String?
+  modifications Json?
+  reviewedAt    DateTime?       @map("reviewed_at") @db.Timestamptz
+  expiresAt     DateTime?       @map("expires_at") @db.Timestamptz
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  syncResult SyncResult @relation(fields: [syncResultId], references: [id], onDelete: Cascade)
+  reviewer   User?      @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+  feedbacks  FeedbackHistory[]
+
+  @@index([reviewerId])
+  @@index([status])
+  @@map("reviews")
+}
+
+model FeedbackHistory {
+  id              String   @id @default(uuid()) @db.Uuid
+  syncResultId    String   @map("sync_result_id") @db.Uuid
+  reviewId        String?  @map("review_id") @db.Uuid
+  feedbackType    String   @map("feedback_type") @db.VarChar(50)
+  originalPatch   String   @map("original_patch")
+  correctedPatch  String?  @map("corrected_patch")
+  confidenceScore Decimal? @map("confidence_score") @db.Decimal(5, 4)
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  syncResult SyncResult @relation(fields: [syncResultId], references: [id], onDelete: Cascade)
+  review     Review?    @relation(fields: [reviewId], references: [id], onDelete: SetNull)
+
+  @@index([syncResultId])
+  @@index([feedbackType])
+  @@index([createdAt])
+  @@map("feedback_history")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String?  @map("user_id") @db.Uuid
+  action       String   @db.VarChar(100)
+  resourceType String   @map("resource_type") @db.VarChar(50)
+  resourceId   String?  @map("resource_id") @db.Uuid
+  oldValue     Json?    @map("old_value")
+  newValue     Json?    @map("new_value")
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  userAgent    String?  @map("user_agent")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

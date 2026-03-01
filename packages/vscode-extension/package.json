@@ -1,0 +1,64 @@
+{
+  "name": "ai-project-sync",
+  "displayName": "AI Project Sync",
+  "description": "Sync code changes across variant projects using AI",
+  "version": "0.1.0",
+  "publisher": "ai-project-sync",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "aiSync.syncCurrentFile", "title": "AI Sync: Sync Current File" },
+      { "command": "aiSync.analyzeProject", "title": "AI Sync: Analyze Project" },
+      { "command": "aiSync.showStatus", "title": "AI Sync: Show Sync Status" },
+      { "command": "aiSync.openDashboard", "title": "AI Sync: Open Dashboard" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "aiSync.syncCurrentFile", "group": "aiSync" }
+      ],
+      "explorer/context": [
+        { "command": "aiSync.syncCurrentFile", "group": "aiSync" }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "ai-sync", "title": "AI Project Sync", "icon": "resources/icon.svg" }
+      ]
+    },
+    "views": {
+      "ai-sync": [
+        { "id": "aiSync.projectGroups", "name": "Project Groups" },
+        { "id": "aiSync.syncTasks", "name": "Sync Tasks" },
+        { "id": "aiSync.reviews", "name": "Pending Reviews" }
+      ]
+    },
+    "configuration": {
+      "title": "AI Project Sync",
+      "properties": {
+        "aiSync.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "API server URL"
+        },
+        "aiSync.token": {
+          "type": "string",
+          "default": "",
+          "description": "JWT authentication token"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0"
+  }
+}

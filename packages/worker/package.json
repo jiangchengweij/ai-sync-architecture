@@ -1,0 +1,29 @@
+{
+  "name": "@ai-project-sync/worker",
+  "version": "0.1.0",
+  "description": "BullMQ worker for async sync task processing",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/main.ts",
+    "start": "node dist/main.js",
+    "test": "jest",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ai-project-sync/ai-engine": "workspace:*",
+    "@ai-project-sync/shared": "workspace:*",
+    "@prisma/client": "^5.10.0",
+    "bullmq": "^5.1.0",
+    "ioredis": "^5.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/jest": "^29.5.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0",
+    "prisma": "^5.10.0"
+  }
+}
