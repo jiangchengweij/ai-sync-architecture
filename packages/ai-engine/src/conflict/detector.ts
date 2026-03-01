@@ -1,22 +1,9 @@
 import { ASTParser, ParsedFunction } from '../ast/parser';
 import { RiskLevel } from '@ai-project-sync/shared';
+import { ConflictType, ConflictRisk, ConflictReport, FuncSig } from './types';
 
-export type ConflictType = 'code_conflict' | 'semantic_conflict' | 'dependency_conflict';
-
-export interface ConflictRisk {
-  type: ConflictType;
-  severity: RiskLevel;
-  filePath: string;
-  description: string;
-  suggestion: string;
-  affectedFunction?: string;
-}
-
-export interface ConflictReport {
-  conflicts: ConflictRisk[];
-  overallRisk: RiskLevel;
-  canAutoResolve: boolean;
-}
+// Re-export types for backward compatibility
+export { ConflictType, ConflictRisk, ConflictReport, FuncSig } from './types';
 
 export class ConflictDetector {
   private parser: ASTParser;
@@ -251,9 +238,4 @@ export class ConflictDetector {
     if (conflicts.some((c) => c.severity === 'medium')) return 'medium';
     return 'low';
   }
-}
-
-interface FuncSig {
-  name: string;
-  paramCount: number;
 }

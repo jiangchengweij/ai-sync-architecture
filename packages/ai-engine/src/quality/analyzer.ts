@@ -2,8 +2,14 @@ import { ParsedFile, ParsedFunction } from '../ast/parser';
 import {
   ConsistencyScore, QualityDiff, TechDebtItem, QualityReport,
 } from './types';
-
-const CONSISTENCY_WEIGHTS = { FILE: 0.3, FUNCTION: 0.4, STRUCTURAL: 0.3 } as const;
+import {
+  DEFAULT_CONSISTENCY_WEIGHTS,
+  QUALITY_THRESHOLDS,
+  AnalyzerOptions,
+  normalizeAnalyzerOptions,
+} from './config';
+import { SignatureMatcher } from './signature-matcher';
+import { DriftDetector } from './drift-detector';
 
 export interface ProjectFiles {
   projectId: string;
@@ -11,6 +17,19 @@ export interface ProjectFiles {
 }
 
 export class QualityAnalyzer {
+  private readonly weights: typeof DEFAULT_CONSISTENCY_WEIGHTS;
+  private readonly thresholds: typeof QUALITY_THRESHOLDS;
+  private readonly signatureMatcher: SignatureMatcher;
+  private readonly driftDetector: DriftDetector;
+
+  constructor(options: AnalyzerOptions = {}) {
+    const normalized = normalizeAnalyzerOptions(options);
+    this.weights = normalized.consistencyWeights;
+    this.thresholds = normalized.thresholds;
+    this.signatureMatcher = new SignatureMatcher();
+    this.driftDetector = new DriftDetector();
+  }
+
   /**
    * Generate a full quality report comparing a variant against the base.
    */
@@ -56,7 +75,7 @@ export class QualityAnalyzer {
         if (variantFuncNames.has(baseFunc.name)) {
           matchedFuncs++;
           const variantFunc = variantParsed.functions.find((f) => f.name === baseFunc.name)!;
-          if (this.signaturesMatch(baseFunc, variantFunc)) {
+          if (this.signatureMatcher.signaturesMatch(baseFunc, variantFunc)) {
             structuralMatches++;
           }
         }
@@ -72,9 +91,9 @@ export class QualityAnalyzer {
     const structuralSimilarity = matchedFuncs > 0 ? structuralMatches / matchedFuncs : 1;
 
     const overallScore =
-      fileMatchRate * CONSISTENCY_WEIGHTS.FILE +
-      functionMatchRate * CONSISTENCY_WEIGHTS.FUNCTION +
-      structuralSimilarity * CONSISTENCY_WEIGHTS.STRUCTURAL;
+      fileMatchRate * this.weights.FILE +
+      functionMatchRate * this.weights.FUNCTION +
+      structuralSimilarity * this.weights.STRUCTURAL;
 
     return {
       variantId: variant.projectId,
@@ -106,17 +125,17 @@ export class QualityAnalyzer {
         if (!variantFunc) continue;
         matched++;
 
-        if (!this.signaturesMatch(baseFunc, variantFunc)) {
+        if (!this.signatureMatcher.signaturesMatch(baseFunc, variantFunc)) {
           diverged.push({
             name: baseFunc.name,
-            baseSignature: this.formatSignature(baseFunc),
-            variantSignature: this.formatSignature(variantFunc),
-            driftType: this.classifyDrift(baseFunc, variantFunc),
+            baseSignature: this.signatureMatcher.formatSignature(baseFunc),
+            variantSignature: this.signatureMatcher.formatSignature(variantFunc),
+            driftType: this.signatureMatcher.classifyDrift(baseFunc, variantFunc),
           });
         }
 
         // Detect unnecessary differences (e.g. only whitespace/naming style)
-        const unnDiff = this.detectUnnecessaryDiff(baseFunc, variantFunc);
+        const unnDiff = this.driftDetector.detectUnnecessaryDiff(baseFunc, variantFunc);
         if (unnDiff) unnecessary.push(unnDiff);
       }
 
@@ -149,7 +168,7 @@ export class QualityAnalyzer {
           filePath,
           functionName: '*',
           type: 'missing',
-          severity: parsed.functions.length > 5 ? 'high' : 'medium',
+          severity: parsed.functions.length > this.thresholds.HIGH_SEVERITY_FUNCTION_COUNT ? 'high' : 'medium',
           description: `File "${filePath}" exists in base but not in variant (${parsed.functions.length} functions)`,
           suggestion: `Review if this file should be synced to the variant`,
         });
@@ -172,7 +191,7 @@ export class QualityAnalyzer {
 
       // Extra functions in variant not in base
       const extraCount = diff.variantFunctionCount - diff.matchedFunctions;
-      if (extraCount > 3) {
+      if (extraCount > this.thresholds.EXTRA_COMPLEXITY_THRESHOLD) {
         items.push({
           variantId: variant.projectId,
           filePath: diff.filePath,
@@ -191,13 +210,13 @@ export class QualityAnalyzer {
   generateRecommendations(consistency: ConsistencyScore, techDebt: TechDebtItem[]): string[] {
     const recs: string[] = [];
 
-    if (consistency.overallScore < 0.5) {
+    if (consistency.overallScore < this.thresholds.MAJOR_SYNC_THRESHOLD) {
       recs.push('Variant has significantly diverged from base. Consider a major sync effort.');
-    } else if (consistency.overallScore < 0.8) {
+    } else if (consistency.overallScore < this.thresholds.MODERATE_DRIFT_THRESHOLD) {
       recs.push('Moderate drift detected. Schedule regular sync cycles to prevent further divergence.');
     }
 
-    if (consistency.unmatchedBaseFiles.length > 5) {
+    if (consistency.unmatchedBaseFiles.length > this.thresholds.MISSING_FILES_THRESHOLD) {
       recs.push(`${consistency.unmatchedBaseFiles.length} base files missing in variant. Review for sync gaps.`);
     }
 
@@ -207,11 +226,11 @@ export class QualityAnalyzer {
     }
 
     const divergedCount = techDebt.filter((d) => d.type === 'diverged').length;
-    if (divergedCount > 10) {
+    if (divergedCount > this.thresholds.DIVERGED_FUNCTIONS_THRESHOLD) {
       recs.push(`${divergedCount} diverged functions detected. Prioritize signature alignment.`);
     }
 
-    if (consistency.structuralSimilarity < 0.7) {
+    if (consistency.structuralSimilarity < this.thresholds.LOW_STRUCTURAL_SIMILARITY) {
       recs.push('Low structural similarity. Many matched functions have different signatures.');
     }
 
@@ -222,37 +241,4 @@ export class QualityAnalyzer {
     return recs;
   }
 
-  private signaturesMatch(a: ParsedFunction, b: ParsedFunction): boolean {
-    return a.params.length === b.params.length &&
-      a.returnType === b.returnType &&
-      a.isAsync === b.isAsync;
-  }
-
-  private formatSignature(func: ParsedFunction): string {
-    const params = func.params.join(', ');
-    const async_ = func.isAsync ? 'async ' : '';
-    return `${async_}(${params}) => ${func.returnType || 'void'}`;
-  }
-
-  private classifyDrift(base: ParsedFunction, variant: ParsedFunction): 'signature' | 'structure' | 'naming' {
-    if (base.params.length !== variant.params.length || base.returnType !== variant.returnType) {
-      return 'signature';
-    }
-    if (base.isAsync !== variant.isAsync) return 'structure';
-    return 'naming';
-  }
-
-  private detectUnnecessaryDiff(
-    base: ParsedFunction, variant: ParsedFunction,
-  ): QualityDiff['unnecessaryDifferences'][0] | null {
-    // Detect async mismatch where it's likely unnecessary
-    if (base.isAsync !== variant.isAsync && base.params.length === variant.params.length) {
-      return {
-        name: base.name,
-        description: `Unnecessary async mismatch: base=${base.isAsync}, variant=${variant.isAsync}`,
-        suggestion: `Align async modifier with base implementation`,
-      };
-    }
-    return null;
-  }
 }
