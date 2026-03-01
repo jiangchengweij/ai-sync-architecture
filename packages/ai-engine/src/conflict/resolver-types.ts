@@ -1,4 +1,4 @@
-import { ConflictRisk, ConflictType } from './detector';
+import { ConflictRisk, ConflictType } from './types';
 
 export interface Resolution {
   conflictIndex: number;

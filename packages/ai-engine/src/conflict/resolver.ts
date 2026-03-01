@@ -1,13 +1,10 @@
-import { ConflictRisk } from './detector';
+import { ConflictRisk } from './types';
 import { Resolution, ResolutionStrategy, ResolverOptions } from './resolver-types';
-
-// Ordered list of [pattern, replacement] tried in sequence for relative imports
-const IMPORT_PATH_PATTERNS: Array<[RegExp, string]> = [
-  [/^\.\/(.+)/, '../$1'],
-  [/^\.\.\/(.+)/, './$1'],
-  [/services\//, 'service/'],
-  [/service\//, 'services/'],
-];
+import {
+  DEFAULT_AUTO_RESOLVE_THRESHOLD,
+  IMPORT_PATH_PATTERNS,
+  CONFIDENCE_SCORES,
+} from './resolver-config';
 
 export class ConflictResolver {
   private importMappings: Map<string, string>;
@@ -17,7 +14,7 @@ export class ConflictResolver {
   constructor(options: ResolverOptions = {}) {
     this.importMappings = options.importPathMappings || new Map();
     this.nameMappings = options.nameMappings || new Map();
-    this.autoResolveThreshold = options.autoResolveThreshold ?? 0.8;
+    this.autoResolveThreshold = options.autoResolveThreshold ?? DEFAULT_AUTO_RESOLVE_THRESHOLD;
   }
 
   resolve(conflicts: ConflictRisk[]): Resolution[] {
@@ -88,14 +85,14 @@ export class ConflictResolver {
         conflict,
         strategy: 'rename_reference',
         patch: `// Replace all references: "${oldName}" → "${mappedName}"`,
-        confidence: 0.95,
+        confidence: CONFIDENCE_SCORES.KNOWN_MAPPING,
         requiresHumanReview: false,
         explanation: `Known mapping: "${oldName}" → "${mappedName}" in variant`,
       };
     }
 
     // Simple rename: high confidence auto-resolve
-    const confidence = 0.85;
+    const confidence = CONFIDENCE_SCORES.SIMPLE_RENAME;
     return {
       conflictIndex: index,
       conflict,
@@ -119,7 +116,7 @@ export class ConflictResolver {
         conflictIndex: index,
         conflict,
         strategy: 'update_params',
-        confidence: 0.6,
+        confidence: CONFIDENCE_SCORES.PARAM_ADDITION,
         requiresHumanReview: true,
         explanation: `New parameter added (${oldCount} → ${newCount}). Check if it has a default value; if so, existing call sites may not need changes.`,
       };
@@ -131,7 +128,7 @@ export class ConflictResolver {
         conflictIndex: index,
         conflict,
         strategy: 'update_params',
-        confidence: 0.4,
+        confidence: CONFIDENCE_SCORES.PARAM_REMOVAL,
         requiresHumanReview: true,
         explanation: `Parameter removed (${oldCount} → ${newCount}). All call sites must be updated to remove the extra argument.`,
       };
@@ -142,7 +139,7 @@ export class ConflictResolver {
       conflictIndex: index,
       conflict,
       strategy: 'manual',
-      confidence: 0.2,
+      confidence: CONFIDENCE_SCORES.MAJOR_CHANGE,
       requiresHumanReview: true,
       explanation: `Significant signature change (${oldCount} → ${newCount} params). Manual review required.`,
     };
@@ -161,7 +158,7 @@ export class ConflictResolver {
         conflict,
         strategy: 'adapt_import_path',
         patch: `// Replace import: "${importPath}" → "${mappedPath}"`,
-        confidence: 0.95,
+        confidence: CONFIDENCE_SCORES.KNOWN_MAPPING,
         requiresHumanReview: false,
         explanation: `Known import mapping: "${importPath}" → "${mappedPath}"`,
       };
@@ -174,7 +171,7 @@ export class ConflictResolver {
         conflict,
         strategy: 'install_package',
         patch: `// Run: npm install ${importPath}`,
-        confidence: 0.9,
+        confidence: CONFIDENCE_SCORES.PACKAGE_INSTALL,
         requiresHumanReview: false,
         explanation: `Install missing package "${importPath}" in variant project`,
       };
@@ -183,7 +180,7 @@ export class ConflictResolver {
     // Relative import — try common path adaptations
     const adapted = this.tryAdaptImportPath(importPath);
     if (adapted) {
-      const confidence = 0.7;
+      const confidence = CONFIDENCE_SCORES.PATH_ADAPTATION;
       return {
         conflictIndex: index,
         conflict,
@@ -205,7 +202,7 @@ export class ConflictResolver {
         conflictIndex: index,
         conflict,
         strategy: 'manual',
-        confidence: 0.1,
+        confidence: CONFIDENCE_SCORES.CODE_CONFLICT_HIGH,
         requiresHumanReview: true,
         explanation: 'Direct code conflict — the target lines differ in the variant. Manual resolution required.',
       };
@@ -215,7 +212,7 @@ export class ConflictResolver {
       conflictIndex: index,
       conflict,
       strategy: 'skip_line',
-      confidence: 0.5,
+      confidence: CONFIDENCE_SCORES.SKIP_LINE,
       requiresHumanReview: true,
       explanation: 'Minor code mismatch — may be safe to skip this line change.',
     };
@@ -235,7 +232,7 @@ export class ConflictResolver {
       conflictIndex: index,
       conflict,
       strategy: 'manual',
-      confidence: 0,
+      confidence: CONFIDENCE_SCORES.FALLBACK,
       requiresHumanReview: true,
       explanation: `Unable to auto-resolve: ${conflict.description}`,
     };
