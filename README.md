@@ -174,3 +174,13 @@ docker compose up -d
 ## License
 
 Private
+
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [使用指南](docs/USAGE.md) | 详细的 CLI、Web、API 使用说明 |
+| [架构设计](docs/ARCHITECTURE.md) | 技术架构和设计决策 |
+| [任务拆解](docs/TASKS.md) | 开发任务和进度追踪 |
+| [API 文档](docs/api/README.md) | REST API 详细规范 |
+| [部署指南](docs/deployment/README.md) | 生产环境部署 |
